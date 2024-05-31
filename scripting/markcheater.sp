@@ -1,8 +1,6 @@
 #include <sdkhooks>
 #include <sdktools>
 #include <sourcemod>
-#include <tf2>
-#include <tf2_stocks>
 
 #pragma newdecls required
 #pragma semicolon 1
