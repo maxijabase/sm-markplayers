@@ -1,21 +1,24 @@
 #include <sdkhooks>
 #include <sdktools>
 #include <sourcemod>
+#include <tf2>
+#include <tf2_stocks>
+
 #pragma newdecls required
 #pragma semicolon 1
 
-public Plugin myinfo =
+public Plugin myinfo = 
 {
-	name		= "[TF2] Mark Cheater",
-	author		= "ampere",
-	description = "testing...",
-	version		= "1.1",
-	url			= ""
+	name = "[TF2] Mark Cheaters", 
+	author = "ampere", 
+	description = "Cheater marker to troll them.", 
+	version = "1.2", 
+	url = "github.com/maxijabase"
 };
 
 ArrayList g_Marked;
-bool	  g_Late;
-Database  g_DB;
+bool g_Late;
+Database g_DB;
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
@@ -38,7 +41,7 @@ public void OnClientPostAdminCheck(int client)
 	{
 		return;
 	}
-
+	
 	SDKHook(client, SDKHook_OnTakeDamage, OnTakeDamage);
 	char steamid[32];
 	GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
@@ -54,7 +57,7 @@ public void OnPlayerReceived(Database db, DBResultSet results, const char[] erro
 		PrintToServer(error);
 		return;
 	}
-
+	
 	if (results.RowCount > 0)
 	{
 		g_Marked.Push(userid);
@@ -100,16 +103,16 @@ public Action CMD_Mark(int client, int args)
 	{
 		return Plugin_Handled;
 	}
-
+	
 	char arg1[32];
 	GetCmdArg(1, arg1, sizeof(arg1));
 	int target = FindTarget(client, arg1);
-
+	
 	if (target == -1)
 	{
 		return Plugin_Handled;
 	}
-
+	
 	int userid = GetClientUserId(target);
 	if (g_Marked.FindValue(userid) != -1)
 	{
@@ -121,11 +124,11 @@ public Action CMD_Mark(int client, int args)
 		GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 		char query[128];
 		g_DB.Format(query, sizeof(query), "INSERT INTO markedplayers (steamid) VALUES ('%s')", steamid);
-
+		
 		DataPack pack = new DataPack();
 		pack.WriteCell(GetClientUserId(client));
 		pack.WriteCell(GetClientUserId(target));
-
+		
 		g_DB.Query(OnMarkedPlayer, query, pack);
 	}
 	return Plugin_Handled;
@@ -137,13 +140,13 @@ public void OnMarkedPlayer(Database db, DBResultSet results, const char[] error,
 	int client = GetClientOfUserId(pack.ReadCell());
 	int target = GetClientOfUserId(pack.ReadCell());
 	delete pack;
-
+	
 	if (error[0] != '\0')
 	{
 		PrintToServer(error);
 		return;
 	}
-
+	
 	g_Marked.Push(GetClientUserId(target));
 	PrintToChat(client, "[SM] %N has been marked as cheater.", target);
 }
@@ -154,25 +157,25 @@ public Action CMD_Unmark(int client, int args)
 	{
 		return Plugin_Handled;
 	}
-
+	
 	char arg1[32];
 	GetCmdArg(1, arg1, sizeof(arg1));
 	int target = FindTarget(client, arg1);
-
+	
 	if (target == -1)
 	{
 		return Plugin_Handled;
 	}
-
+	
 	int userid = GetClientUserId(target);
-	int found  = g_Marked.FindValue(userid);
+	int found = g_Marked.FindValue(userid);
 	if (found != -1)
 	{
 		DataPack pack = new DataPack();
 		pack.WriteCell(found);
 		pack.WriteCell(GetClientUserId(client));
 		pack.WriteCell(GetClientUserId(target));
-
+		
 		char steamid[32];
 		GetClientAuthId(target, AuthId_Steam2, steamid, sizeof(steamid));
 		char query[128];
@@ -188,17 +191,17 @@ public Action CMD_Unmark(int client, int args)
 public void OnUnmarkedPlayer(Database db, DBResultSet results, const char[] error, DataPack pack)
 {
 	pack.Reset();
-	int found  = pack.ReadCell();
+	int found = pack.ReadCell();
 	int client = GetClientOfUserId(pack.ReadCell());
 	int target = GetClientOfUserId(pack.ReadCell());
 	delete pack;
-
+	
 	if (error[0] != '\0')
 	{
 		PrintToServer(error);
 		return;
 	}
-
+	
 	g_Marked.Erase(found);
 	PrintToChat(client, "[SM] %N has been unmarked.", target);
 }
@@ -209,13 +212,20 @@ public Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &dam
 	{
 		return Plugin_Continue;
 	}
-
+	
 	int attackerUserId = GetClientUserId(attacker);
 	if (g_Marked.FindValue(attackerUserId) != -1)
 	{
-		damage = GetRandomFloat(1.0, 5.0);
+		
+		int victimHealth = GetClientHealth(victim);
+		int victimMaxHealth = GetEntProp(victim, Prop_Data, "m_iMaxHealth");
+		if (victimHealth < victimMaxHealth * 1.5)
+		{
+			SetEntityHealth(victim, victimHealth + 5);
+		}
+		damage = 0.0;
 		return Plugin_Changed;
 	}
-
+	
 	return Plugin_Continue;
-}
+} 
