@@ -386,8 +386,6 @@ public void OnMarkedPlayersReceived(Database db, DBResultSet results, const char
     }
 
     int client = userid ? GetClientOfUserId(userid) : 0;
-
-
     if (!client)
     {
         char chatMessage[1024];
