@@ -15,7 +15,7 @@ public Plugin myinfo =
   url = "github.com/maxijabase"
 };
 
-ArrayList g_Marked;
+bool g_Marked[MAXPLAYERS + 1] = { false, ... };
 bool g_Late;
 Database g_DB;
 
@@ -30,7 +30,6 @@ public void OnPluginStart()
   RegAdminCmd("sm_mark", CMD_Mark, ADMFLAG_GENERIC);
   RegAdminCmd("sm_unmark", CMD_Unmark, ADMFLAG_GENERIC);
   RegAdminCmd("sm_marked", CMD_Marked, ADMFLAG_GENERIC);
-  g_Marked = new ArrayList(ByteCountToCells(32));
   LoadTranslations("common.phrases");
   Database.Connect(OnDatabaseConnected, "storage-local");
 }
@@ -57,12 +56,11 @@ public void OnPlayerReceived(Database db, DBResultSet results, const char[] erro
     PrintToServer(error);
     return;
   }
-  
-  if (results.RowCount > 0)
-  {
-    g_Marked.Push(userid);
-    PrintToServer("[SM] %N was found in the marked database. Marking...", GetClientOfUserId(userid));
-  }
+  int client = GetClientOfUserId(userid);
+  if (client <= 0)
+    return;
+    
+  g_Marked[client] = results.RowCount > 0;
 }
 
 public void OnDatabaseConnected(Database db, const char[] error, any data)
@@ -90,11 +88,7 @@ public void OnTablesCreated(Database db, DBResultSet results, const char[] error
 public void OnClientDisconnect(int client)
 {
   SDKUnhook(client, SDKHook_OnTakeDamage, OnTakeDamage);
-  int found = g_Marked.FindValue(GetClientUserId(client));
-  if (found != -1)
-  {
-    g_Marked.Erase(found);
-  }
+  g_Marked[client] = false;
 }
 
 public Action CMD_Mark(int client, int args)
@@ -113,11 +107,14 @@ public Action CMD_Mark(int client, int args)
   
   if (SimpleRegexMatch(arg1, "STEAM_[10]:[10]:[0-9]+"))
   {
-    for (int i = 0; i < g_Marked.Length; i++)
+    for (int i = 1; i <= MaxClients; i++)
     {
+      if (!IsClientConnected(i))
+        continue;
+        
       char sid[32];
-      GetClientAuthId(GetClientOfUserId(g_Marked.Get(i)), AuthId_Steam2, sid, sizeof(sid));
-      if (!strcmp(arg1, sid))
+      GetClientAuthId(i, AuthId_Steam2, sid, sizeof(sid));
+      if (StrEqual(arg1, sid) && g_Marked[i])
       {
         ReplyToCommand(client, "[SM] This player has already been marked!");
         return Plugin_Handled;
@@ -135,8 +132,7 @@ public Action CMD_Mark(int client, int args)
       return Plugin_Handled;
     }
     
-    int userid = GetClientUserId(target);
-    if (g_Marked.FindValue(userid) != -1)
+    if (g_Marked[target])
     {
       ReplyToCommand(client, "[SM] This player has already been marked!");
       return Plugin_Handled;
@@ -172,57 +168,62 @@ public void OnMarkedPlayer(Database db, DBResultSet results, const char[] error,
   }
   
   pack.Reset();
-  int client = pack.ReadCell();
-  int target = GetClientOfUserId(pack.ReadCell());
+  int clientUserId = pack.ReadCell();
+  int client = GetClientOfUserId(clientUserId);
+  int targetUserId = pack.ReadCell();
+  int target = GetClientOfUserId(targetUserId);
   bool isSteamid = pack.ReadCell();
+  
   if (isSteamid)
   {
     char steamid[32];
     pack.ReadString(steamid, sizeof(steamid));
-    if (client == 0)
+    if (clientUserId == 0)
     {
       PrintToServer("[SM] The specified Steam ID (%s) has been marked.", steamid);
     }
-    else
+    else if (client > 0)
     {
-      PrintToChat(GetClientOfUserId(client), "[SM] The specified Steam ID (%s) has been marked.", steamid);
+      PrintToChat(client, "[SM] The specified Steam ID (%s) has been marked.", steamid);
     }
     
     for (int i = 1; i <= MaxClients; i++)
     {
       if (!IsClientConnected(i))
-      {
-        return;
-      }
+        continue;
       
       char sid[32];
       GetClientAuthId(i, AuthId_Steam2, sid, sizeof(sid));
-      if (!strcmp(steamid, sid))
+      if (StrEqual(steamid, sid))
       {
-        g_Marked.Push(GetClientUserId(i));
-        if (client == 0)
+        g_Marked[i] = true;
+        if (clientUserId == 0)
         {
           PrintToServer("[SM] The user (%N) has been found inside the server, marking...", i);
         }
-        else
+        else if (client > 0)
         {
-          PrintToChat(GetClientOfUserId(client), "[SM] The user (%N) has been found inside the server, marking...", i);
+          PrintToChat(client, "[SM] The user (%N) has been found inside the server, marking...", i);
         }
       }
     }
+    delete pack;
     return;
   }
   
   delete pack;
   
-  g_Marked.Push(GetClientUserId(target));
-  if (client == 0)
+  if (target > 0)
   {
-    PrintToServer("[SM] %N has been marked as cheater.", target);
-  }
-  else
-  {
-    PrintToChat(GetClientOfUserId(client), "[SM] %N has been marked as cheater.", target);
+    g_Marked[target] = true;
+    if (clientUserId == 0)
+    {
+      PrintToServer("[SM] %N has been marked as cheater.", target);
+    }
+    else if (client > 0)
+    {
+      PrintToChat(client, "[SM] %N has been marked as cheater.", target);
+    }
   }
 }
 
@@ -243,13 +244,17 @@ public Action CMD_Unmark(int client, int args)
   if (SimpleRegexMatch(arg1, "STEAM_[10]:[10]:[0-9]+"))
   {
     bool found = false;
-    for (int i = 0; i < g_Marked.Length; i++)
+    for (int i = 1; i <= MaxClients; i++)
     {
+      if (!IsClientConnected(i))
+        continue;
+        
       char sid[32];
-      GetClientAuthId(GetClientOfUserId(g_Marked.Get(i)), AuthId_Steam2, sid, sizeof(sid));
-      if (!strcmp(arg1, sid))
+      GetClientAuthId(i, AuthId_Steam2, sid, sizeof(sid));
+      if (StrEqual(arg1, sid) && g_Marked[i])
       {
         found = true;
+        break;
       }
     }
     if (!found)
@@ -269,8 +274,7 @@ public Action CMD_Unmark(int client, int args)
       return Plugin_Handled;
     }
     
-    int userid = GetClientUserId(target);
-    if (g_Marked.FindValue(userid) == -1)
+    if (!g_Marked[target])
     {
       ReplyToCommand(client, "[SM] This player was not marked!");
       return Plugin_Handled;
@@ -306,57 +310,62 @@ public void OnUnmarkedPlayer(Database db, DBResultSet results, const char[] erro
   }
   
   pack.Reset();
-  int client = pack.ReadCell();
-  int target = GetClientOfUserId(pack.ReadCell());
+  int clientUserId = pack.ReadCell();
+  int client = GetClientOfUserId(clientUserId);
+  int targetUserId = pack.ReadCell();
+  int target = GetClientOfUserId(targetUserId);
   bool isSteamid = pack.ReadCell();
+  
   if (isSteamid)
   {
     char steamid[32];
     pack.ReadString(steamid, sizeof(steamid));
-    if (client == 0)
+    if (clientUserId == 0)
     {
       PrintToServer("[SM] The specified Steam ID (%s) has been unmarked.", steamid);
     }
-    else
+    else if (client > 0)
     {
-      PrintToChat(GetClientOfUserId(client), "[SM] The specified Steam ID (%s) has been unmarked.", steamid);
+      PrintToChat(client, "[SM] The specified Steam ID (%s) has been unmarked.", steamid);
     }
     
     for (int i = 1; i <= MaxClients; i++)
     {
       if (!IsClientConnected(i))
-      {
-        return;
-      }
+        continue;
       
       char sid[32];
       GetClientAuthId(i, AuthId_Steam2, sid, sizeof(sid));
-      if (StrEqual(steamid, sid) && g_Marked.FindValue(GetClientUserId(i)) != -1)
+      if (StrEqual(steamid, sid) && g_Marked[i])
       {
-        g_Marked.Erase(g_Marked.FindValue(GetClientUserId(i)));
-        if (client == 0)
+        g_Marked[i] = false;
+        if (clientUserId == 0)
         {
           PrintToServer("[SM] The user (%N) has been found inside the server, unmarking...", i);
         }
-        else
+        else if (client > 0)
         {
-          PrintToChat(GetClientOfUserId(client), "[SM] The user (%N) has been found inside the server, unmarking...", i);
+          PrintToChat(client, "[SM] The user (%N) has been found inside the server, unmarking...", i);
         }
       }
     }
+    delete pack;
     return;
   }
   
   delete pack;
   
-  g_Marked.Erase(g_Marked.FindValue(GetClientUserId(target)));
-  if (client == 0)
+  if (target > 0)
   {
-    PrintToServer("[SM] %N has been unmarked!", target);
-  }
-  else
-  {
-    PrintToChat(GetClientOfUserId(client), "[SM] %N has been unmarked!", target);
+    g_Marked[target] = false;
+    if (clientUserId == 0)
+    {
+      PrintToServer("[SM] %N has been unmarked!", target);
+    }
+    else if (client > 0)
+    {
+      PrintToChat(client, "[SM] %N has been unmarked!", target);
+    }
   }
 }
 
@@ -389,14 +398,26 @@ public void OnMarkedPlayersReceived(Database db, DBResultSet results, const char
   if (!client)
   {
     char chatMessage[1024];
-    if (g_Marked.Length > 0)
+    int markedCount = 0;
+    
+    // Count marked players
+    for (int i = 1; i <= MaxClients; i++)
+    {
+      if (IsClientInGame(i) && g_Marked[i])
+        markedCount++;
+    }
+    
+    if (markedCount > 0)
     {
       chatMessage = "[SM] In-game marked players:\n";
-      for (int i = 0; i < g_Marked.Length; i++)
+      for (int i = 1; i <= MaxClients; i++)
       {
-        char buf[32];
-        Format(buf, sizeof(buf), "  - %N\n", GetClientOfUserId(g_Marked.Get(i)));
-        StrCat(chatMessage, sizeof(chatMessage), buf);
+        if (IsClientInGame(i) && g_Marked[i])
+        {
+          char buf[32];
+          Format(buf, sizeof(buf), "  - %N\n", i);
+          StrCat(chatMessage, sizeof(chatMessage), buf);
+        }
       }
     }
     else
@@ -415,14 +436,17 @@ public void OnMarkedPlayersReceived(Database db, DBResultSet results, const char
     char entry[64];
     results.FetchString(0, entry, sizeof(entry));
     
-    for (int i = 0; i < g_Marked.Length; i++)
+    for (int i = 1; i <= MaxClients; i++)
     {
+      if (!IsClientConnected(i) || !g_Marked[i])
+        continue;
+        
       char steamid[32];
-      GetClientAuthId(GetClientOfUserId(g_Marked.Get(i)), AuthId_Steam2, steamid, sizeof(steamid));
-      if (!strcmp(entry, steamid))
+      GetClientAuthId(i, AuthId_Steam2, steamid, sizeof(steamid));
+      if (StrEqual(entry, steamid))
       {
         char buf[32];
-        Format(buf, sizeof(buf), " (%N)", GetClientOfUserId(g_Marked.Get(i)));
+        Format(buf, sizeof(buf), " (%N)", i);
         StrCat(entry, sizeof(entry), buf);
       }
     }
@@ -445,15 +469,13 @@ public int MenuHandler_MarkedPlayers(Menu menu, MenuAction action, int client, i
 
 public Action OnTakeDamage(int victim, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damagecustom)
 {
-  if (victim == attacker || attacker == 0)
+  if (victim == attacker || attacker == 0 || attacker > MaxClients)
   {
     return Plugin_Continue;
   }
   
-  int attackerUserId = GetClientUserId(attacker);
-  if (g_Marked.FindValue(attackerUserId) != -1)
+  if (g_Marked[attacker])
   {
-    
     int victimHealth = GetClientHealth(victim);
     int victimMaxHealth = GetEntProp(victim, Prop_Data, "m_iMaxHealth");
     if (victimHealth < victimMaxHealth * 1.5)
